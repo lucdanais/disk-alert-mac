@@ -127,13 +127,15 @@ struct RuleEditor: View {
     var defaultEject: String
 
     var body: some View {
-        if rule.split {
+        if model.settings.splitSounds && rule.split {
             SoundRow(title: "Connected", selection: $rule.connectSound,
                      leading: ["Default"], trailing: ["Mute"], defaultSound: defaultConnect)
             SoundRow(title: "Ejected", selection: $rule.ejectSound,
                      leading: ["Default"], trailing: ["Mute"], defaultSound: defaultEject)
         }
-        Toggle("Separate connect and eject sounds", isOn: $rule.split)
+        if model.settings.splitSounds {
+            Toggle("Separate connect and eject sounds", isOn: $rule.split)
+        }
     }
 }
 
@@ -157,7 +159,7 @@ struct RuleHeader: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if !rule.split {
+            if !(model.settings.splitSounds && rule.split) {
                 SoundMenu(selection: $rule.sound, leading: ["Default"], trailing: ["Mute"],
                           custom: model.customSounds, defaultSound: defaultSound)
                     .fixedSize()
@@ -206,6 +208,13 @@ struct DrivesTab: View {
             } footer: {
                 Text("A drive’s own sound wins over its type. “Mute” turns off connect and eject alerts.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(isOn: $model.settings.splitSounds) {
+                    Text("Separate connect and eject sounds")
+                    Text("Lets each drive and drive type have its own switch for a different eject sound. When off, every drive uses one sound for both.")
+                }
             }
         }
         .formStyle(.grouped)

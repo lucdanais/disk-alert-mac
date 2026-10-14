@@ -36,6 +36,10 @@ final class AppModel: ObservableObject {
     @Published var settings: AppSettings {
         didSet {
             guard settings != oldValue else { return }
+            if oldValue.splitSounds && !settings.splitSounds {
+                settings.clearSplits()   // re-enters didSet once, then saves
+                return
+            }
             Store.save(settings, to: DiskAlert.settingsURL)
             if settings.enabled != oldValue.enabled {
                 settings.enabled ? AgentControl.enable() : AgentControl.disable()
