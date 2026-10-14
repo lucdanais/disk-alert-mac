@@ -34,7 +34,14 @@ enum Snapshots {
     /// with rounded corners, an optional title bar and a soft shadow.
     private static func render<V: View>(_ view: V, title: String?, to url: URL, look: NSAppearance.Name) {
         let appearance = NSAppearance(named: look)
-        let host = NSHostingView(rootView: view)
+        let dark = look == .darkAqua
+        // An explicit background in the matching look. Without it, views that have no
+        // background of their own (the menu) are captured over a white backdrop in Dark mode.
+        let surface = dark ? Color(white: 0.16) : Color(white: 0.97)
+        let root = view
+            .background(surface)
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let host = NSHostingView(rootView: root)
         host.appearance = appearance
         let size = host.fittingSize
         host.frame = NSRect(origin: .zero, size: size)
@@ -56,7 +63,6 @@ enum Snapshots {
         host.cacheDisplay(in: host.bounds, to: content)
         window.orderOut(nil)
 
-        let dark = look == .darkAqua
         let titleHeight: CGFloat = title == nil ? 0 : 52
         let margin: CGFloat = 40
         let frameSize = NSSize(width: size.width, height: size.height + titleHeight)
