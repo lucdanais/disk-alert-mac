@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app
+        id: build
+        run: |
+          set -o pipefail
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(cat VERSION)-build.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          chmod +x scripts/build.sh
+          VERSION="$VERSION" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/build.sh 2>&1 | tee build.log
+
+      - name: Save build log
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          mkdir -p /tmp/ci-logs
+          cp build.log /tmp/ci-logs/build.log 2>/dev/null || echo "No log produced" > /tmp/ci-logs/build.log
+          echo "run ${GITHUB_RUN_NUMBER} commit ${GITHUB_SHA} result ${OUTCOME}" > /tmp/ci-logs/STATUS
+          cd /tmp/ci-logs
+          git init -q -b ci-logs
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" add .
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Build ${GITHUB_RUN_NUMBER}: ${OUTCOME}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Disk-Alert-${{ steps.build.outputs.version }}
+          path: build/*.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            gh release create "$GITHUB_REF_NAME" build/*.zip --title "Disk Alert $VERSION" --generate-notes
+          else
+            gh release delete latest-build --yes --cleanup-tag 2>/dev/null || true
+            gh release create latest-build build/*.zip --prerelease --target "$GITHUB_SHA" \
+              --title "Latest build ($VERSION)" \
+              --notes "Automatic build from the latest commit (${GITHUB_SHA::7}). For a stable version, use the newest release without the Pre-release label."
+          fi
