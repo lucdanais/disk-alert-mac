@@ -74,8 +74,12 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
 
         let model = (desc[kDADiskDescriptionDeviceModelKey as String] as? String) ?? ""
         let isImage = model.trimmingCharacters(in: .whitespaces) == "Disk Image"
+        // A built-in SD card slot reports as an internal device, so internal media still
+        // counts when it is removable or ejectable. Only fixed internal disks are skipped.
         let internalDrive = (desc[kDADiskDescriptionDeviceInternalKey as String] as? Bool) ?? false
-        if internalDrive && !isImage { return nil }
+        let removable = (desc[kDADiskDescriptionMediaRemovableKey as String] as? Bool) ?? false
+        let ejectable = (desc[kDADiskDescriptionMediaEjectableKey as String] as? Bool) ?? false
+        if internalDrive && !isImage && !removable && !ejectable { return nil }
 
         let name = (desc[kDADiskDescriptionVolumeNameKey as String] as? String) ?? url.lastPathComponent
         var id = name
