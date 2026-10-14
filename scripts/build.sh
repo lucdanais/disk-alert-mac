@@ -41,6 +41,9 @@ iconutil -c icns "$OUT/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns
 mkdir -p "$AGENT/Contents/Resources"
 cp "$APP/Contents/Resources/AppIcon.icns" "$AGENT/Contents/Resources/AppIcon.icns"
 
+echo "Adding bundled sounds…"
+cp -R Resources/Sounds "$APP/Contents/Resources/Sounds"
+
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -82,7 +85,11 @@ codesign --force --sign - --timestamp=none "$AGENT"
 codesign --force --sign - --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
 
-echo "Packaging…"
-ZIP="$OUT/Disk-Alert-$VERSION.zip"
-ditto -c -k --keepParent "$APP" "$ZIP"
-echo "Done: $ZIP"
+echo "Packaging disk image…"
+STAGE="$OUT/dmg"
+mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/Disk Alert.app"
+ln -s /Applications "$STAGE/Applications"
+DMG="$OUT/Disk-Alert-$VERSION.dmg"
+hdiutil create -volname "Disk Alert $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+echo "Done: $DMG"

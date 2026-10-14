@@ -89,6 +89,26 @@ struct SoundMenu: NSViewRepresentable {
     }
 }
 
+/// Plays the chosen sound. Greyed out for Mute, Off, or a missing file.
+struct PlayButton: View {
+    let sound: String?
+
+    var body: some View {
+        let playable = sound.map { Sounds.url(for: $0) != nil } ?? false
+        Button {
+            if let sound { SoundPreview.play(sound) }
+        } label: {
+            Image(systemName: "play.fill")
+                .font(.system(size: 11))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderless)
+        .disabled(!playable)
+        .help("Play")
+        .accessibilityLabel("Play \(sound ?? "sound")")
+    }
+}
+
 /// A labelled row with a sound menu, as used throughout Settings.
 struct SoundRow: View {
     @EnvironmentObject var model: AppModel
@@ -101,9 +121,12 @@ struct SoundRow: View {
 
     var body: some View {
         LabeledContent {
-            SoundMenu(selection: $selection, leading: leading, trailing: trailing,
-                      custom: model.customSounds, defaultSound: defaultSound)
-                .fixedSize()
+            HStack(spacing: 6) {
+                SoundMenu(selection: $selection, leading: leading, trailing: trailing,
+                          custom: model.customSounds, defaultSound: defaultSound)
+                    .fixedSize()
+                PlayButton(sound: selection == "Default" ? defaultSound : selection)
+            }
         } label: {
             Text(title)
             if let subtitle { Text(subtitle) }

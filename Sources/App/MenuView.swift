@@ -41,6 +41,9 @@ struct MenuView: View {
                 if model.mountedVolumes.count > 1 {
                     MenuRow(title: "Eject All…", symbol: "eject") { model.ejectAll() }
                 }
+                MenuRow(title: "Check for Updates…", symbol: "arrow.down.circle") {
+                    Updater.shared.check(userInitiated: true)
+                }
                 MenuRow(title: "Settings…", symbol: "gearshape", shortcut: "⌘,") {
                     AppDelegate.shared?.showSettings()
                 }

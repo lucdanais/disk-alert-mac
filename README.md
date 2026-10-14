@@ -16,12 +16,13 @@ A lightweight macOS menu bar app that notifies you when drives connect, eject, o
 - **Light, Dark or System appearance.**
 - **Opens at login** in the menu bar (can be turned off in Settings).
 - **Respects Focus and Do Not Disturb**, like any other Mac notification.
+- **Updates itself.** Check for Updates in the menu bar or Settings installs the newest release from GitHub. Older versions stay available on the [Releases page](https://github.com/open-luc/disk-alert-mac/releases).
 - **Runs in the background.** Alerts keep working after you quit the menu bar app. Turn them off with the switch in Settings.
 
 ## Install
 
-1. Download `Disk-Alert-x.y.z.zip` from the [latest release](https://github.com/open-luc/disk-alert-mac/releases/latest).
-2. Unzip it and drag **Disk Alert** into your Applications folder.
+1. Download `Disk-Alert-x.y.z.dmg` from the [latest release](https://github.com/open-luc/disk-alert-mac/releases/latest).
+2. Open it and drag **Disk Alert** into your Applications folder.
 3. The app isn't signed with a paid Apple developer account, so the first time, Control-click it and choose **Open**, then **Open** again.
    If macOS still blocks it, run this once in Terminal:
    ```
@@ -52,7 +53,7 @@ On a Mac with Xcode or the Command Line Tools:
 ./scripts/build.sh
 ```
 
-The app lands in `build/Disk Alert.app`. Every push to `main` is also built automatically by GitHub Actions and published as the **Latest build** pre-release.
+The app lands in `build/Disk Alert.app`, with an installer at `build/Disk-Alert-x.y.z.dmg`. Every push to `main` is built by GitHub Actions and published as a new release, with the patch number going up each time (major and minor come from the `VERSION` file).
 
 ## License
 

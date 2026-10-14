@@ -122,6 +122,24 @@ final class AppModel: ObservableObject {
 
     // MARK: Sounds
 
+    /// Copies the sounds that ship with the app into ~/Library/Sounds, once each.
+    /// A sound the user removes later is not put back.
+    func installBundledSounds() {
+        guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Sounds"),
+              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        let defaults = UserDefaults.standard
+        var done = Set(defaults.stringArray(forKey: "installedBundledSounds") ?? [])
+        for file in files where !done.contains(file.lastPathComponent) {
+            let dest = Sounds.userFolder.appendingPathComponent(file.lastPathComponent)
+            if !FileManager.default.fileExists(atPath: dest.path) {
+                try? FileManager.default.copyItem(at: file, to: dest)
+            }
+            done.insert(file.lastPathComponent)
+        }
+        defaults.set(Array(done), forKey: "installedBundledSounds")
+        refresh()
+    }
+
     /// Converts any audio file macOS can read into a notification-ready .caf in ~/Library/Sounds.
     func addSound(from source: URL) {
         let base = source.deletingPathExtension().lastPathComponent

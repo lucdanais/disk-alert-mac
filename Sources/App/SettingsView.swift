@@ -77,6 +77,8 @@ struct GeneralTab: View {
                 .pickerStyle(.segmented)
             }
 
+            UpdatesSection()
+
             Section {
                 HStack {
                     Button("Send Test Alert") { AgentControl.sendTest() }
@@ -92,6 +94,26 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .frame(width: SettingsLayout.size.width, height: SettingsLayout.size.height)
         .onAppear { model.refresh() }
+    }
+}
+
+struct UpdatesSection: View {
+    @ObservedObject var updater = Updater.shared
+
+    var body: some View {
+        Section("Updates") {
+            LabeledContent {
+                Button("Check for Updates") { updater.check(userInitiated: true) }
+                    .disabled(updater.state == .checking || updater.state == .downloading)
+            } label: {
+                Text("Disk Alert \(updater.currentVersion)")
+                Text(updater.statusText)
+            }
+            Toggle(isOn: $updater.automatic) {
+                Text("Check automatically")
+                Text("Once a day. You’re always asked before anything installs.")
+            }
+        }
     }
 }
 
@@ -139,6 +161,7 @@ struct RuleHeader: View {
                 SoundMenu(selection: $rule.sound, leading: ["Default"], trailing: ["Mute"],
                           custom: model.customSounds, defaultSound: defaultSound)
                     .fixedSize()
+                PlayButton(sound: rule.sound == "Default" ? defaultSound : rule.sound)
             }
         }
     }
