@@ -11,7 +11,7 @@ struct Volume {
     let id: String
     let name: String
     let url: URL
-    let isImage: Bool
+    let category: DriveCategory
 }
 
 enum Event { case connect, eject, unsafe }
@@ -72,8 +72,11 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
               let url = desc[kDADiskDescriptionVolumePathKey as String] as? URL,
               url.path.hasPrefix("/Volumes/") else { return nil }
 
-        let model = (desc[kDADiskDescriptionDeviceModelKey as String] as? String) ?? ""
-        let isImage = model.trimmingCharacters(in: .whitespaces) == "Disk Image"
+        let model = ((desc[kDADiskDescriptionDeviceModelKey as String] as? String) ?? "")
+            .trimmingCharacters(in: .whitespaces)
+        let proto = (desc[kDADiskDescriptionDeviceProtocolKey as String] as? String) ?? ""
+        let isImage = model == "Disk Image"
+
         // A built-in SD card slot reports as an internal device, so internal media still
         // counts when it is removable or ejectable. Only fixed internal disks are skipped.
         let internalDrive = (desc[kDADiskDescriptionDeviceInternalKey as String] as? Bool) ?? false
@@ -88,7 +91,8 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
            let text = CFUUIDCreateString(kCFAllocatorDefault, (raw as! CFUUID)) {
             id = text as String
         }
-        return Volume(bsd: bsd, id: id, name: name, url: url, isImage: isImage)
+        let category = DriveCategory.classify(isImage: isImage, deviceProtocol: proto, model: model)
+        return Volume(bsd: bsd, id: id, name: name, url: url, category: category)
     }
 
     func update(_ disk: DADisk) {
@@ -100,7 +104,7 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
             }
         } else if let vol = mounted.removeValue(forKey: bsd) {
             // The volume is no longer mounted.
-            let proper = ejectRequested.remove(bsd) != nil
+            let proper = ejectRequested.remove(bsd) != nil || vol.category == .diskImage
             fire(proper ? .eject : .unsafe, vol)
         }
     }
@@ -110,7 +114,7 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         ejectRequested.remove(bsd)
         if let vol = mounted.removeValue(forKey: bsd) {
             // Gone while still mounted: unplugged without ejecting.
-            fire(.unsafe, vol)
+            fire(vol.category == .diskImage ? .eject : .unsafe, vol)
         }
     }
 
@@ -119,30 +123,6 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
     }
 
     // MARK: Notifications
-
-    private enum SoundChoice { case muted, silent, named(String) }
-
-    private func choice(_ event: Event, _ vol: Volume, _ s: AppSettings) -> SoundChoice {
-        let fallback: String
-        switch event {
-        case .connect: fallback = s.connectSound
-        case .eject: fallback = s.ejectSound
-        case .unsafe: fallback = s.unsafeSound
-        }
-
-        var pick = "Default"
-        if event != .unsafe {
-            if vol.isImage {
-                pick = s.diskImageSound
-            } else if let rule = s.driveRules[vol.id] {
-                pick = rule.split ? (event == .connect ? rule.connectSound : rule.ejectSound) : rule.sound
-            }
-        }
-        if pick == "Mute" { return .muted }
-        let name = pick == "Default" ? fallback : pick
-        if name == "Off" || name == "None" { return .silent }
-        return .named(name)
-    }
 
     private func details(_ vol: Volume) -> (info: String, format: String, total: Int64) {
         let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeLocalizedFormatDescriptionKey]
@@ -164,8 +144,9 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         switch event {
         case .connect:
             let d = details(vol)
-            if !vol.isImage {
-                Store.remember(KnownDrive(id: vol.id, name: vol.name, format: d.format, capacity: d.total, lastSeen: Date()))
+            if vol.category != .diskImage {
+                Store.remember(KnownDrive(id: vol.id, name: vol.name, format: d.format, capacity: d.total,
+                                          lastSeen: Date(), category: vol.category))
             }
             if s.showInfo { body = d.info }
             Store.log(HistoryEvent(date: Date(), name: vol.name, kind: .connected))
@@ -177,8 +158,14 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
             Store.log(HistoryEvent(date: Date(), name: vol.name, kind: .unsafe))
         }
 
-        let sound = choice(event, vol, s)
-        if case .muted = sound { return }
+        // Sound: an unplugged warning always uses its own sound, even for a muted drive.
+        let soundName: String
+        if event == .unsafe {
+            soundName = s.unsafeSound
+        } else {
+            soundName = s.resolvedSound(connect: event == .connect, driveID: vol.id, category: vol.category)
+            if soundName == "Mute" { return }
+        }
 
         let content = UNMutableNotificationContent()
         switch event {
@@ -188,8 +175,9 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         }
         content.subtitle = vol.name
         content.body = body
+        if event == .connect { content.userInfo = ["path": vol.url.path] }
 
-        if case .named(let name) = sound, let file = Sounds.url(for: name) {
+        if soundName != "Off", let file = Sounds.url(for: soundName) {
             if s.playSoundDirectly {
                 play(file)
             } else {
@@ -219,6 +207,30 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .list, .sound])
+    }
+
+    /// Clicking a "connected" notification opens the drive in Finder.
+    /// Other notifications open Disk Alert's settings.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        defer { completionHandler() }
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        if let path = response.notification.request.content.userInfo["path"] as? String,
+           FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        } else {
+            openMainApp()
+        }
+    }
+
+    private func openMainApp() {
+        // The agent lives at Disk Alert.app/Contents/Library/LoginItems/Disk Alert Agent.app
+        let main = Bundle.main.bundleURL
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        if main.pathExtension == "app" {
+            NSWorkspace.shared.openApplication(at: main, configuration: NSWorkspace.OpenConfiguration())
+        }
     }
 
     // MARK: Test

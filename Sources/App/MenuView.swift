@@ -1,82 +1,193 @@
+import AppKit
 import SwiftUI
 
+/// The menu bar window, laid out like Control Center: a header module,
+/// drive tiles, then plain menu-style rows.
 struct MenuView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Disk Alert").font(.headline)
-                Spacer()
-                Text(model.settings.enabled ? "On" : "Paused")
-                    .font(.caption)
-                    .foregroundStyle(model.settings.enabled ? Color.green : Color.secondary)
-                Toggle("Disk alerts", isOn: $model.settings.enabled)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .controlSize(.small)
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            header
 
-            Divider()
-
-            Text("CONNECTED NOW")
-                .font(.caption2.weight(.semibold))
+            Text("Connected")
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.top, 2)
 
             if model.mountedVolumes.isEmpty {
-                Text("No drives connected")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
+                HStack(spacing: 10) {
+                    Image(systemName: "externaldrive.badge.questionmark")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                    Text("No drives connected")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .moduleBackground()
             } else {
                 VStack(spacing: 6) {
                     ForEach(model.mountedVolumes) { v in
-                        HStack(spacing: 10) {
-                            Image(systemName: "externaldrive.fill")
-                                .foregroundStyle(Color.accentColor)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(v.name).font(.callout)
-                                if v.total > 0 {
-                                    Text("\(Format.bytes(v.free)) free of \(Format.bytes(v.total))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Button {
-                                model.eject(v)
-                            } label: {
-                                Image(systemName: "eject.fill")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Eject \(v.name)")
-                            .accessibilityLabel("Eject \(v.name)")
-                        }
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                        DriveTile(volume: v)
                     }
                 }
+            }
+
+            Divider().padding(.horizontal, 6).padding(.top, 2)
+
+            VStack(spacing: 0) {
                 if model.mountedVolumes.count > 1 {
-                    Button("Eject All…") { model.ejectAll() }
-                        .frame(maxWidth: .infinity)
-                        .foregroundStyle(.orange)
+                    MenuRow(title: "Eject All…", symbol: "eject") { model.ejectAll() }
+                }
+                MenuRow(title: "Settings…", symbol: "gearshape", shortcut: "⌘,") {
+                    AppDelegate.shared?.showSettings()
+                }
+                MenuRow(title: "Quit Disk Alert", symbol: "power", detail: "Alerts keep running", shortcut: "⌘Q") {
+                    NSApp.terminate(nil)
                 }
             }
+        }
+        .padding(10)
+        .frame(width: 320)
+        .onAppear { model.refresh() }
+    }
 
-            Divider()
-
-            Button("Settings…") { AppDelegate.shared?.showSettings() }
-                .buttonStyle(.plain)
-            VStack(alignment: .leading, spacing: 2) {
-                Button("Quit Disk Alert") { NSApp.terminate(nil) }
-                    .buttonStyle(.plain)
-                Text("Alerts keep running after you quit")
-                    .font(.caption2)
+    private var header: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(model.settings.enabled ? Color.accentColor : Color.secondary.opacity(0.35))
+                Image(systemName: model.settings.enabled ? "externaldrive.fill.badge.checkmark" : "externaldrive")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Disk Alert").font(.headline)
+                Text(model.settings.enabled ? "Watching for drives" : "Paused")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Spacer()
+            Toggle("Disk alerts", isOn: $model.settings.enabled)
+                .toggleStyle(.switch)
+                .labelsHidden()
         }
-        .padding(14)
-        .frame(width: 300)
-        .onAppear { model.refresh() }
+        .padding(12)
+        .moduleBackground()
+    }
+}
+
+struct DriveTile: View {
+    @EnvironmentObject var model: AppModel
+    let volume: MountedVolume
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: volume.category.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color.accentColor.opacity(0.15)))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(volume.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                if volume.total > 0 {
+                    ProgressView(value: volume.usedFraction)
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                        .tint(volume.usedFraction > 0.9 ? .orange : .accentColor)
+                    Text("\(Format.bytes(volume.free)) free of \(Format.bytes(volume.total))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 4)
+            Button {
+                model.eject(volume)
+            } label: {
+                Image(systemName: "eject.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .modernCircleButton()
+            .help("Eject \(volume.name)")
+            .accessibilityLabel("Eject \(volume.name)")
+        }
+        .padding(10)
+        .moduleBackground()
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { NSWorkspace.shared.open(volume.url) }
+        .help("Double-click to open in Finder")
+    }
+}
+
+/// A row that highlights on hover like a native menu item.
+struct MenuRow: View {
+    let title: String
+    let symbol: String
+    var detail: String? = nil
+    var shortcut: String? = nil
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .frame(width: 18)
+                    .foregroundStyle(hovering ? Color.white : Color.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(hovering ? Color.white.opacity(0.85) : Color.secondary)
+                    }
+                }
+                Spacer()
+                if let shortcut {
+                    Text(shortcut)
+                        .foregroundStyle(hovering ? Color.white.opacity(0.85) : Color.secondary)
+                }
+            }
+            .foregroundStyle(hovering ? Color.white : Color.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovering ? Color.accentColor : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Styling
+
+extension View {
+    /// The rounded "module" behind each group, like Control Center tiles.
+    func moduleBackground() -> some View {
+        background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+    }
+
+    /// Liquid Glass circular button on macOS 26 and later, a plain circle before that.
+    @ViewBuilder
+    func modernCircleButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glass).buttonBorderShape(.circle)
+        } else {
+            self.buttonStyle(.borderless)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+        }
     }
 }

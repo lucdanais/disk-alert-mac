@@ -18,6 +18,49 @@ enum DiskAlert {
     static var historyURL: URL { supportFolder.appendingPathComponent("history.json") }
 }
 
+// MARK: - Drive categories
+
+enum DriveCategory: String, Codable, CaseIterable, Identifiable {
+    case drive, memoryCard, diskImage
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .drive: return "External drives"
+        case .memoryCard: return "SD and memory cards"
+        case .diskImage: return "Disk images"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .drive: return "SSDs, hard drives and USB sticks"
+        case .memoryCard: return "Cards in the SD slot or a card reader"
+        case .diskImage: return "Installers and .dmg files"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .drive: return "externaldrive.fill"
+        case .memoryCard: return "sdcard.fill"
+        case .diskImage: return "opticaldisc.fill"
+        }
+    }
+
+    /// Works out the category from what Disk Arbitration reports about the device.
+    static func classify(isImage: Bool, deviceProtocol: String, model: String) -> DriveCategory {
+        if isImage { return .diskImage }
+        if deviceProtocol.caseInsensitiveCompare("Secure Digital") == .orderedSame { return .memoryCard }
+        let m = model.lowercased()
+        let cardWords = ["sd card", "sdxc", "sdhc", "card reader", "cardreader", "memory card",
+                         "cfexpress", "compactflash", "microsd", "sd/mmc", "multi-card", "multicard"]
+        if cardWords.contains(where: { m.contains($0) }) { return .memoryCard }
+        return .drive
+    }
+}
+
 // MARK: - Settings
 
 struct DriveRule: Codable, Equatable {
@@ -26,7 +69,7 @@ struct DriveRule: Codable, Equatable {
     var connectSound = "Default"
     var ejectSound = "Default"
 
-    init() {}
+    init(sound: String = "Default") { self.sound = sound }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -35,21 +78,41 @@ struct DriveRule: Codable, Equatable {
         connectSound = try c.decodeIfPresent(String.self, forKey: .connectSound) ?? "Default"
         ejectSound = try c.decodeIfPresent(String.self, forKey: .ejectSound) ?? "Default"
     }
+
+    /// The sound this rule picks for a connect or eject. "Default" means no opinion.
+    func pick(connect: Bool) -> String {
+        split ? (connect ? connectSound : ejectSound) : sound
+    }
+}
+
+enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
 }
 
 struct AppSettings: Codable, Equatable {
     var enabled = true
     var connectSound = "Glass"
     var ejectSound = "Pop"
-    var unsafeSound = "Basso"        // "Off" plays no sound
+    var unsafeSound = "Sosumi"       // "Off" plays no sound
     var connectTitle = "Drive Connected"
     var ejectTitle = "Drive Ejected"
     var unsafeTitle = "Not Ejected Properly"
     var showInfo = true
     var openInFinder = false
-    var diskImageSound = "Default"   // "Default", "Mute" or a sound name
     var playSoundDirectly = false    // fallback if notification sounds stay silent
+    var appearance: AppearanceMode = .system
+    var categoryRules: [String: DriveRule] = AppSettings.defaultCategoryRules
     var driveRules: [String: DriveRule] = [:]
+
+    static let defaultCategoryRules: [String: DriveRule] = [DriveCategory.diskImage.rawValue: DriveRule(sound: "Purr")]
 
     init() {}
 
@@ -65,9 +128,30 @@ struct AppSettings: Codable, Equatable {
         unsafeTitle = try c.decodeIfPresent(String.self, forKey: .unsafeTitle) ?? d.unsafeTitle
         showInfo = try c.decodeIfPresent(Bool.self, forKey: .showInfo) ?? d.showInfo
         openInFinder = try c.decodeIfPresent(Bool.self, forKey: .openInFinder) ?? d.openInFinder
-        diskImageSound = try c.decodeIfPresent(String.self, forKey: .diskImageSound) ?? d.diskImageSound
         playSoundDirectly = try c.decodeIfPresent(Bool.self, forKey: .playSoundDirectly) ?? d.playSoundDirectly
+        appearance = try c.decodeIfPresent(AppearanceMode.self, forKey: .appearance) ?? d.appearance
+        categoryRules = try c.decodeIfPresent([String: DriveRule].self, forKey: .categoryRules) ?? d.categoryRules
         driveRules = try c.decodeIfPresent([String: DriveRule].self, forKey: .driveRules) ?? [:]
+    }
+
+    func defaultSound(connect: Bool) -> String { connect ? connectSound : ejectSound }
+
+    /// Drive rule first, then its category, then the default sound.
+    func resolvedSound(connect: Bool, driveID: String?, category: DriveCategory) -> String {
+        if let id = driveID, let rule = driveRules[id] {
+            let p = rule.pick(connect: connect)
+            if p != "Default" { return p }
+        }
+        if let rule = categoryRules[category.rawValue] {
+            let p = rule.pick(connect: connect)
+            if p != "Default" { return p }
+        }
+        return defaultSound(connect: connect)
+    }
+
+    /// What "Default" means for a drive: its category's sound, else the general default.
+    func fallbackSound(connect: Bool, category: DriveCategory) -> String {
+        resolvedSound(connect: connect, driveID: nil, category: category)
     }
 }
 
@@ -77,6 +161,22 @@ struct KnownDrive: Codable, Equatable, Identifiable {
     var format: String
     var capacity: Int64
     var lastSeen: Date
+    var category: DriveCategory = .drive
+
+    init(id: String, name: String, format: String, capacity: Int64, lastSeen: Date, category: DriveCategory) {
+        self.id = id; self.name = name; self.format = format
+        self.capacity = capacity; self.lastSeen = lastSeen; self.category = category
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        format = try c.decodeIfPresent(String.self, forKey: .format) ?? ""
+        capacity = try c.decodeIfPresent(Int64.self, forKey: .capacity) ?? 0
+        lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen) ?? Date()
+        category = try c.decodeIfPresent(DriveCategory.self, forKey: .category) ?? .drive
+    }
 }
 
 struct HistoryEvent: Codable, Equatable {

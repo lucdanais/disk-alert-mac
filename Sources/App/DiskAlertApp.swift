@@ -23,10 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+        AppModel.shared.applyAppearance()
         let defaults = UserDefaults.standard
         if !defaults.bool(forKey: "hasLaunchedBefore") {
             defaults.set(true, forKey: "hasLaunchedBefore")
-            AppModel.shared.setLaunchAtLogin(true)
+            AppModel.shared.setOpenAtLogin(true)
             showSettings()
         }
     }
@@ -39,12 +40,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func showSettings() {
         if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView().environmentObject(AppModel.shared))
-            let window = NSWindow(contentViewController: host)
+            let model = AppModel.shared
+            let tabs = NSTabViewController()
+            tabs.tabStyle = .toolbar
+            tabs.canPropagateSelectedChildViewControllerTitle = false
+
+            func add<V: View>(_ title: String, _ symbol: String, _ view: V) {
+                let host = NSHostingController(rootView: view.environmentObject(model))
+                host.sizingOptions = [.preferredContentSize]
+                let item = NSTabViewItem(viewController: host)
+                item.label = title
+                item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+                tabs.addTabViewItem(item)
+            }
+            add("General", "gearshape", GeneralTab())
+            add("Drives", "externaldrive", DrivesTab())
+            add("Sounds", "speaker.wave.2", SoundsTab())
+
+            let window = NSWindow(contentViewController: tabs)
             window.title = "Disk Alert"
             window.styleMask = [.titled, .closable, .miniaturizable]
+            window.toolbarStyle = .preference
             window.isReleasedWhenClosed = false
             window.delegate = self
+            window.setContentSize(SettingsLayout.size)
             window.center()
             settingsWindow = window
         }
@@ -55,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Back to a menu bar only app (no Dock icon) once Settings closes.
     func windowWillClose(_ notification: Notification) {
+        SoundPreview.stop()
         NSApp.setActivationPolicy(.accessory)
     }
 }

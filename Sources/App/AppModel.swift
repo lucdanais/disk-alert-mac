@@ -9,6 +9,25 @@ struct MountedVolume: Identifiable, Equatable {
     let name: String
     let free: Int64
     let total: Int64
+    let category: DriveCategory
+
+    var usedFraction: Double {
+        total > 0 ? min(1, max(0, Double(total - free) / Double(total))) : 0
+    }
+}
+
+/// Plays sound previews. One at a time, so hovering through a menu never piles sounds up.
+enum SoundPreview {
+    private static var player: NSSound?
+
+    static func play(_ name: String) {
+        guard let url = Sounds.url(for: name) else { return }
+        player?.stop()
+        player = NSSound(contentsOf: url, byReference: true)
+        player?.play()
+    }
+
+    static func stop() { player?.stop() }
 }
 
 final class AppModel: ObservableObject {
@@ -21,14 +40,13 @@ final class AppModel: ObservableObject {
             if settings.enabled != oldValue.enabled {
                 settings.enabled ? AgentControl.enable() : AgentControl.disable()
             }
+            if settings.appearance != oldValue.appearance { applyAppearance() }
         }
     }
     @Published var drives: [KnownDrive] = []
     @Published var mountedVolumes: [MountedVolume] = []
     @Published var customSounds: [String] = []
-    @Published var launchAtLogin = false
-
-    private var player: NSSound?
+    @Published var loginStatus: SMAppService.Status = .notRegistered
 
     init() {
         settings = Store.settings
@@ -36,7 +54,7 @@ final class AppModel: ObservableObject {
             Store.save(settings, to: DiskAlert.settingsURL)
         }
         if settings.enabled { AgentControl.enable() }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        loginStatus = SMAppService.mainApp.status
         refresh()
 
         let nc = NSWorkspace.shared.notificationCenter
@@ -49,42 +67,60 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
-        drives = Store.drives.values.sorted { $0.lastSeen > $1.lastSeen }
+        let known = Store.drives
+        drives = known.values.sorted { $0.lastSeen > $1.lastSeen }
         customSounds = Sounds.customNames
-        mountedVolumes = Self.currentVolumes()
+        mountedVolumes = Self.currentVolumes(known: known)
+        loginStatus = SMAppService.mainApp.status
     }
 
-    static func currentVolumes() -> [MountedVolume] {
+    static func currentVolumes(known: [String: KnownDrive] = Store.drives) -> [MountedVolume] {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsInternalKey, .volumeIsEjectableKey,
-                                      .volumeIsRemovableKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey]
+                                      .volumeIsRemovableKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
+                                      .volumeUUIDStringKey]
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         return urls.compactMap { url in
             guard url.path.hasPrefix("/Volumes/"), let v = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             let external = v.volumeIsInternal == false || v.volumeIsEjectable == true || v.volumeIsRemovable == true
             guard external else { return nil }
-            return MountedVolume(url: url, name: v.volumeName ?? url.lastPathComponent,
-                                 free: Int64(v.volumeAvailableCapacity ?? 0), total: Int64(v.volumeTotalCapacity ?? 0))
+            let name = v.volumeName ?? url.lastPathComponent
+            let match = v.volumeUUIDString.flatMap { known[$0] } ?? known.values.first { $0.name == name }
+            let category: DriveCategory = match?.category ?? (Self.isDiskImage(url) ? .diskImage : .drive)
+            return MountedVolume(url: url, name: name,
+                                 free: Int64(v.volumeAvailableCapacity ?? 0), total: Int64(v.volumeTotalCapacity ?? 0),
+                                 category: category)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    // MARK: Per-drive rules
+    /// Disk images are never remembered as drives, so anything unknown and not removable is treated as one.
+    private static func isDiskImage(_ url: URL) -> Bool {
+        let v = try? url.resourceValues(forKeys: [.volumeIsRemovableKey, .volumeIsLocalKey])
+        return v?.volumeIsRemovable == false && v?.volumeIsLocal == true
+    }
 
-    func rule(for id: String) -> DriveRule { settings.driveRules[id] ?? DriveRule() }
+    // MARK: Rules
 
-    func setRule(_ rule: DriveRule, for id: String) { settings.driveRules[id] = rule }
+    func ruleBinding(forDrive id: String) -> Binding<DriveRule> {
+        Binding(get: { self.settings.driveRules[id] ?? DriveRule() },
+                set: { self.settings.driveRules[id] = $0 })
+    }
 
-    func ruleBinding(for id: String) -> Binding<DriveRule> {
-        Binding(get: { self.rule(for: id) }, set: { self.setRule($0, for: id) })
+    func ruleBinding(forCategory c: DriveCategory) -> Binding<DriveRule> {
+        Binding(get: { self.settings.categoryRules[c.rawValue] ?? DriveRule() },
+                set: { self.settings.categoryRules[c.rawValue] = $0 })
+    }
+
+    // MARK: Appearance
+
+    func applyAppearance() {
+        switch settings.appearance {
+        case .system: NSApp?.appearance = nil
+        case .light: NSApp?.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp?.appearance = NSAppearance(named: .darkAqua)
+        }
     }
 
     // MARK: Sounds
-
-    func preview(_ name: String) {
-        guard let url = Sounds.url(for: name) else { return }
-        player?.stop()
-        player = NSSound(contentsOf: url, byReference: true)
-        player?.play()
-    }
 
     /// Converts any audio file macOS can read into a notification-ready .caf in ~/Library/Sounds.
     func addSound(from source: URL) {
@@ -130,15 +166,17 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(Sounds.userFolder)
     }
 
-    // MARK: Startup
+    // MARK: Open at login
 
-    func setLaunchAtLogin(_ on: Bool) {
+    var openAtLogin: Bool { loginStatus == .enabled || loginStatus == .requiresApproval }
+
+    func setOpenAtLogin(_ on: Bool) {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
             if on { SMAppService.openSystemSettingsLoginItems() }
         }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        loginStatus = SMAppService.mainApp.status
     }
 
     // MARK: Ejecting

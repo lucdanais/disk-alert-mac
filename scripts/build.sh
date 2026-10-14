@@ -15,6 +15,7 @@ rm -rf "$OUT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$AGENT/Contents/MacOS" "$OUT/obj"
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
+echo "Xcode: $(xcodebuild -version 2>/dev/null | tr "\n" " ")"
 echo "Swift: $(xcrun swiftc --version 2>&1 | head -1)"
 
 compile() { # compile <output> <sources...>
