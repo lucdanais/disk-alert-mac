@@ -35,7 +35,7 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         DARegisterDiskAppearedCallback(session, nil, { disk, ctx in
             Monitor.from(ctx).update(disk)
         }, ctx)
-        DARegisterDiskDescriptionChangedCallback(session, nil, kDADiskDescriptionWatchVolumePath, { disk, _, ctx in
+        DARegisterDiskDescriptionChangedCallback(session, nil, kDADiskDescriptionWatchVolumePath.takeUnretainedValue(), { disk, _, ctx in
             Monitor.from(ctx).update(disk)
         }, ctx)
         DARegisterDiskDisappearedCallback(session, nil, { disk, ctx in
