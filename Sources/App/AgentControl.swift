@@ -28,6 +28,7 @@ enum AgentControl {
 
     /// Makes sure the agent is installed, points at this copy of the app, and is running.
     static func enable() {
+        removeLegacyAgents()
         let wanted = plistContents as NSDictionary
         let current = NSDictionary(contentsOf: plistURL)
         let needsWrite = current == nil || current != wanted
@@ -43,8 +44,27 @@ enum AgentControl {
 
     /// Stops the agent and removes it from login.
     static func disable() {
+        removeLegacyAgents()
         launchctl(["bootout", "\(domain)/\(DiskAlert.agentLabel)"])
         try? FileManager.default.removeItem(at: plistURL)
+    }
+
+    /// Finds agents left behind by older versions under a different label, then stops and removes them.
+    /// Any plist in ~/Library/LaunchAgents that runs the Disk Alert Agent binary counts, whatever its label.
+    static func removeLegacyAgents() {
+        let agentSuffix = "/Disk Alert Agent.app/Contents/MacOS/DiskAlertAgent"
+        let folder = plistURL.deletingLastPathComponent()
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "plist" {
+            guard file.standardizedFileURL != plistURL.standardizedFileURL,
+                  let dict = NSDictionary(contentsOf: file),
+                  let args = dict["ProgramArguments"] as? [String],
+                  let last = args.last, last.hasSuffix(agentSuffix) else { continue }
+            if let label = dict["Label"] as? String, label != DiskAlert.agentLabel {
+                launchctl(["bootout", "\(domain)/\(label)"])
+            }
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     static var isRunning: Bool {

@@ -28,7 +28,7 @@ jobs:
           if [[ -n "$LAST" ]]; then
             PATCH=$(( ${LAST##*.} + 1 ))
           else
-            PATCH=1
+            PATCH=0
           fi
           echo "version=$BASE.$PATCH" >> "$GITHUB_OUTPUT"
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
@@ -65,7 +65,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           OUT="$RUNNER_TEMP/shots"
-          timeout 180 "build/Disk Alert.app/Contents/MacOS/DiskAlert" --snapshots "$OUT" || true
+          mkdir -p "$OUT"
+          LOG="$RUNNER_TEMP/snapshots.log"
+          # macOS has no timeout command; perl's alarm stops the app if it hangs.
+          perl -e 'alarm 150; exec @ARGV' "build/Disk Alert.app/Contents/MacOS/DiskAlert" --snapshots "$OUT" > "$LOG" 2>&1 || echo "Snapshot run exited with status $?" >> "$LOG"
+          cp "$LOG" "$OUT/snapshots.log"
+          cat "$OUT/snapshots.log"
           ls -la "$OUT"
           cd "$OUT"
           git init -q -b screenshots

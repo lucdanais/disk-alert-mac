@@ -19,6 +19,15 @@ A lightweight macOS menu bar app that notifies you when drives connect, eject, o
 - **Updates itself.** Check for Updates in the menu bar or Settings installs the newest release from GitHub. Older versions stay available on the [Releases page](https://github.com/open-luc/disk-alert-mac/releases).
 - **Runs in the background.** Alerts keep working after you quit the menu bar app. Turn them off with the switch in Settings.
 
+## Screenshots
+
+| Light | Dark |
+| --- | --- |
+| ![Menu bar, light](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/menu-light.png) | ![Menu bar, dark](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/menu-dark.png) |
+| ![General settings, light](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-general-light.png) | ![General settings, dark](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-general-dark.png) |
+| ![Drives settings, light](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-drives-light.png) | ![Drives settings, dark](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-drives-dark.png) |
+| ![Custom Sounds settings, light](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-sounds-light.png) | ![Custom Sounds settings, dark](https://raw.githubusercontent.com/open-luc/disk-alert-mac/screenshots/settings-sounds-dark.png) |
+
 ## Install
 
 1. Download `Disk-Alert-x.y.z.dmg` from the [latest release](https://github.com/open-luc/disk-alert-mac/releases/latest).
