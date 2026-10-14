@@ -237,8 +237,17 @@ struct SoundsTab: View {
                             .accessibilityLabel("Play \(name)")
                             Text(name)
                             Spacer()
-                            Button("Delete…", role: .destructive) { model.confirmDeleteSound(name) }
-                                .foregroundStyle(.red)
+                            if model.bundledSounds.contains(name) {
+                                Text("Included")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color.primary.opacity(0.07)))
+                            } else {
+                                Button("Delete…", role: .destructive) { model.confirmDeleteSound(name) }
+                                    .foregroundStyle(.red)
+                            }
                         }
                     }
                 }

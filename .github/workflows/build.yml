@@ -59,6 +59,20 @@ jobs:
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Build ${GITHUB_RUN_NUMBER}: ${OUTCOME}"
           git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
 
+      - name: Screenshots
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OUT="$RUNNER_TEMP/shots"
+          timeout 180 "build/Disk Alert.app/Contents/MacOS/DiskAlert" --snapshots "$OUT" || true
+          ls -la "$OUT"
+          cd "$OUT"
+          git init -q -b screenshots
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" add .
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Screenshots for ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" screenshots
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

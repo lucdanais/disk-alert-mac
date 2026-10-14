@@ -23,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+        if Snapshots.isActive {
+            Snapshots.run()
+            return
+        }
         AppModel.shared.applyAppearance()
         AppModel.shared.installBundledSounds()
         Updater.shared.startAutomaticChecks()

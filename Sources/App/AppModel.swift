@@ -31,11 +31,14 @@ enum SoundPreview {
 }
 
 final class AppModel: ObservableObject {
-    static let shared = AppModel()
+    static let shared = Snapshots.isActive ? AppModel(sample: ()) : AppModel()
+
+    /// True for the sample model used to draw README screenshots: nothing is saved or started.
+    let isSample: Bool
 
     @Published var settings: AppSettings {
         didSet {
-            guard settings != oldValue else { return }
+            guard settings != oldValue, !isSample else { return }
             Store.save(settings, to: DiskAlert.settingsURL)
             if settings.enabled != oldValue.enabled {
                 settings.enabled ? AgentControl.enable() : AgentControl.disable()
@@ -46,9 +49,11 @@ final class AppModel: ObservableObject {
     @Published var drives: [KnownDrive] = []
     @Published var mountedVolumes: [MountedVolume] = []
     @Published var customSounds: [String] = []
+    @Published var bundledSounds: Set<String> = []
     @Published var loginStatus: SMAppService.Status = .notRegistered
 
     init() {
+        isSample = false
         settings = Store.settings
         if !FileManager.default.fileExists(atPath: DiskAlert.settingsURL.path) {
             Store.save(settings, to: DiskAlert.settingsURL)
@@ -66,7 +71,30 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Sample drives and sounds for screenshots.
+    init(sample: Void) {
+        isSample = true
+        settings = AppSettings()
+        let now = Date()
+        drives = [
+            KnownDrive(id: "a", name: "Media SSD", format: "APFS", capacity: 2_000_000_000_000, lastSeen: now, category: .drive),
+            KnownDrive(id: "b", name: "EOS_DIGITAL", format: "ExFAT", capacity: 128_000_000_000, lastSeen: now.addingTimeInterval(-3600), category: .memoryCard)
+        ]
+        settings.driveRules["b"] = DriveRule(connect: "Hero", eject: "Default")
+        mountedVolumes = [
+            MountedVolume(url: URL(fileURLWithPath: "/Volumes/Media SSD"), name: "Media SSD",
+                          free: 1_240_000_000_000, total: 2_000_000_000_000, category: .drive),
+            MountedVolume(url: URL(fileURLWithPath: "/Volumes/EOS_DIGITAL"), name: "EOS_DIGITAL",
+                          free: 41_800_000_000, total: 128_000_000_000, category: .memoryCard)
+        ]
+        customSounds = ["fart-reverb", "Shutter Click"]
+        bundledSounds = ["fart-reverb"]
+        loginStatus = .enabled
+    }
+
     func refresh() {
+        guard !isSample else { return }
+        bundledSounds = Set(Self.bundledSoundFiles.map { $0.deletingPathExtension().lastPathComponent })
         let known = Store.drives
         drives = known.values.sorted { $0.lastSeen > $1.lastSeen }
         customSounds = Sounds.customNames
@@ -122,60 +150,27 @@ final class AppModel: ObservableObject {
 
     // MARK: Sounds
 
-    /// Copies the sounds that ship with the app into ~/Library/Sounds, once each.
-    /// A sound the user removes later is not put back.
+    static var bundledSoundFiles: [URL] {
+        guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Sounds") else { return [] }
+        return (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    }
+
+    /// Puts the sounds that come with the app into ~/Library/Sounds whenever one is missing,
+    /// so notifications can always play them. They can't be deleted from the app.
     func installBundledSounds() {
-        guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Sounds"),
-              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
-        let defaults = UserDefaults.standard
-        var done = Set(defaults.stringArray(forKey: "installedBundledSounds") ?? [])
-        for file in files where !done.contains(file.lastPathComponent) {
+        guard !isSample else { return }
+        for file in Self.bundledSoundFiles {
             let dest = Sounds.userFolder.appendingPathComponent(file.lastPathComponent)
             if !FileManager.default.fileExists(atPath: dest.path) {
                 try? FileManager.default.copyItem(at: file, to: dest)
             }
-            done.insert(file.lastPathComponent)
-        }
-        defaults.set(Array(done), forKey: "installedBundledSounds")
-        refresh()
-    }
-
-    /// Converts any audio file macOS can read into a notification-ready .caf in ~/Library/Sounds.
-    func addSound(from source: URL) {
-        let base = source.deletingPathExtension().lastPathComponent
-        var name = base
-        var n = 2
-        while Sounds.url(for: name) != nil { name = "\(base) \(n)"; n += 1 }
-        let dest = Sounds.userFolder.appendingPathComponent("\(name).caf")
-
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
-        p.arguments = ["-f", "caff", "-d", "LEI16", source.path, dest.path]
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        var ok = false
-        if (try? p.run()) != nil {
-            p.waitUntilExit()
-            ok = p.terminationStatus == 0
-        }
-        if !ok, Sounds.extensions.contains(source.pathExtension.lowercased()) {
-            let copy = Sounds.userFolder.appendingPathComponent("\(name).\(source.pathExtension.lowercased())")
-            try? FileManager.default.copyItem(at: source, to: copy)
         }
         refresh()
-    }
-
-    func chooseSounds() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.audio]
-        panel.allowsMultipleSelection = true
-        panel.message = "Choose sounds to add to Disk Alert"
-        NSApp.activate(ignoringOtherApps: true)
-        if panel.runModal() == .OK { panel.urls.forEach(addSound) }
     }
 
     /// Asks first, then moves the sound file to the Trash.
     func confirmDeleteSound(_ name: String) {
+        guard !bundledSounds.contains(name) else { return }
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.alertStyle = .warning
