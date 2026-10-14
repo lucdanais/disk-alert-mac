@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -33,8 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let defaults = UserDefaults.standard
         if !defaults.bool(forKey: "hasLaunchedBefore") {
             defaults.set(true, forKey: "hasLaunchedBefore")
-            AppModel.shared.setOpenAtLogin(true)
             showSettings()
+        }
+        // Open at login starts on. Applied once, so turning it off later sticks.
+        if !defaults.bool(forKey: "openAtLoginDefaultApplied") {
+            defaults.set(true, forKey: "openAtLoginDefaultApplied")
+            if SMAppService.mainApp.status != .enabled { AppModel.shared.setOpenAtLogin(true) }
         }
     }
 

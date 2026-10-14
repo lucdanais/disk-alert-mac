@@ -11,6 +11,7 @@ struct Volume {
     let id: String
     let name: String
     let url: URL
+    let format: String
     let category: DriveCategory
 }
 
@@ -85,14 +86,10 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         if internalDrive && !isImage && !removable && !ejectable { return nil }
 
         let name = (desc[kDADiskDescriptionVolumeNameKey as String] as? String) ?? url.lastPathComponent
-        var id = name
-        if let raw = desc[kDADiskDescriptionVolumeUUIDKey as String],
-           CFGetTypeID(raw as CFTypeRef) == CFUUIDGetTypeID(),
-           let text = CFUUIDCreateString(kCFAllocatorDefault, (raw as! CFUUID)) {
-            id = text as String
-        }
+        let id = VolumeInfo.uuid(from: desc) ?? name
+        let kind = (desc[kDADiskDescriptionVolumeKindKey as String] as? String) ?? ""
         let category = DriveCategory.classify(isImage: isImage, deviceProtocol: proto, model: model)
-        return Volume(bsd: bsd, id: id, name: name, url: url, category: category)
+        return Volume(bsd: bsd, id: id, name: name, url: url, format: VolumeInfo.formatName(kind), category: category)
     }
 
     func update(_ disk: DADisk) {
@@ -125,11 +122,10 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
     // MARK: Notifications
 
     private func details(_ vol: Volume) -> (info: String, format: String, total: Int64) {
-        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeLocalizedFormatDescriptionKey]
-        let values = try? vol.url.resourceValues(forKeys: keys)
-        let total = Int64(values?.volumeTotalCapacity ?? 0)
-        let free = Int64(values?.volumeAvailableCapacity ?? 0)
-        let format = values?.volumeLocalizedFormatDescription ?? ""
+        let space = VolumeInfo.space(atMountPoint: vol.url.path)
+        let total = space?.total ?? 0
+        let free = space?.free ?? 0
+        let format = vol.format
         var parts: [String] = []
         if total > 0 { parts.append("\(Format.bytes(free)) free of \(Format.bytes(total))") }
         if !format.isEmpty { parts.append(format) }

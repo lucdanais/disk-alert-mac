@@ -103,27 +103,21 @@ final class AppModel: ObservableObject {
     }
 
     static func currentVolumes(known: [String: KnownDrive] = Store.drives) -> [MountedVolume] {
-        let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsInternalKey, .volumeIsEjectableKey,
-                                      .volumeIsRemovableKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
-                                      .volumeUUIDStringKey]
-        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
-        return urls.compactMap { url in
-            guard url.path.hasPrefix("/Volumes/"), let v = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
-            let external = v.volumeIsInternal == false || v.volumeIsEjectable == true || v.volumeIsRemovable == true
-            guard external else { return nil }
-            let name = v.volumeName ?? url.lastPathComponent
-            let match = v.volumeUUIDString.flatMap { known[$0] } ?? known.values.first { $0.name == name }
-            let category: DriveCategory = match?.category ?? (Self.isDiskImage(url) ? .diskImage : .drive)
-            return MountedVolume(url: url, name: name,
-                                 free: Int64(v.volumeAvailableCapacity ?? 0), total: Int64(v.volumeTotalCapacity ?? 0),
-                                 category: category)
+        VolumeInfo.mounted().map { v in
+            let match = v.uuid.flatMap { known[$0] } ?? known.values.first { $0.name == v.name }
+            return MountedVolume(url: URL(fileURLWithPath: v.path), name: v.name,
+                                 free: v.space?.free ?? 0, total: v.space?.total ?? 0,
+                                 category: match?.category ?? v.category)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    /// Disk images are never remembered as drives, so anything unknown and not removable is treated as one.
-    private static func isDiskImage(_ url: URL) -> Bool {
-        let v = try? url.resourceValues(forKeys: [.volumeIsRemovableKey, .volumeIsLocalKey])
-        return v?.volumeIsRemovable == false && v?.volumeIsLocal == true
+    /// Forgets a drive and its sounds. It reappears the next time it connects.
+    func forgetDrive(_ id: String) {
+        var all = Store.drives
+        all.removeValue(forKey: id)
+        Store.save(all, to: DiskAlert.drivesURL)
+        settings.driveRules.removeValue(forKey: id)
+        refresh()
     }
 
     // MARK: Rules
@@ -166,6 +160,40 @@ final class AppModel: ObservableObject {
             }
         }
         refresh()
+    }
+
+    /// Converts any audio file macOS can read into a notification-ready .caf in ~/Library/Sounds.
+    func addSound(from source: URL) {
+        let base = source.deletingPathExtension().lastPathComponent
+        var name = base
+        var n = 2
+        while Sounds.url(for: name) != nil { name = "\(base) \(n)"; n += 1 }
+        let dest = Sounds.userFolder.appendingPathComponent("\(name).caf")
+
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+        p.arguments = ["-f", "caff", "-d", "LEI16", source.path, dest.path]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        var ok = false
+        if (try? p.run()) != nil {
+            p.waitUntilExit()
+            ok = p.terminationStatus == 0
+        }
+        if !ok, Sounds.extensions.contains(source.pathExtension.lowercased()) {
+            let copy = Sounds.userFolder.appendingPathComponent("\(name).\(source.pathExtension.lowercased())")
+            try? FileManager.default.copyItem(at: source, to: copy)
+        }
+        refresh()
+    }
+
+    func chooseSounds() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose sounds to add to Disk Alert"
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK { panel.urls.forEach(addSound) }
     }
 
     /// Asks first, then moves the sound file to the Trash.

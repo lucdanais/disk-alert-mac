@@ -292,3 +292,89 @@ enum Format {
         return f.string(fromByteCount: value)
     }
 }
+
+// MARK: - Volume info without touching files
+
+import DiskArbitration
+
+/// Reads volume details from Disk Arbitration and statfs only. Neither opens anything on
+/// the drive, so macOS has no reason to ask for permission to access removable volumes.
+enum VolumeInfo {
+    struct Space { let free: Int64; let total: Int64 }
+
+    /// Free and total space from the file system's own counters.
+    static func space(atMountPoint path: String) -> Space? {
+        var st = statfs()
+        guard statfs(path, &st) == 0 else { return nil }
+        let block = Int64(st.f_bsize)
+        return Space(free: Int64(st.f_bavail) * block, total: Int64(st.f_blocks) * block)
+    }
+
+    /// Plain-English name for a file system type such as "apfs" or "exfat".
+    static func formatName(_ kind: String) -> String {
+        switch kind.lowercased() {
+        case "apfs": return "APFS"
+        case "hfs": return "Mac OS Extended"
+        case "exfat": return "ExFAT"
+        case "msdos": return "MS-DOS (FAT)"
+        case "ntfs": return "NTFS"
+        case "udf": return "UDF"
+        case "": return ""
+        default: return kind.uppercased()
+        }
+    }
+
+    struct Mounted {
+        let path: String
+        let name: String
+        let uuid: String?
+        let format: String
+        let space: Space?
+        let isImage: Bool
+        let category: DriveCategory
+    }
+
+    /// External volumes mounted under /Volumes, described without reading them.
+    static func mounted() -> [Mounted] {
+        guard let session = DASessionCreate(kCFAllocatorDefault) else { return [] }
+        var list: UnsafeMutablePointer<statfs>?
+        let count = Int(getmntinfo(&list, MNT_NOWAIT))
+        guard count > 0, let list else { return [] }
+        var result: [Mounted] = []
+        for i in 0..<count {
+            var entry = list[i]
+            let mountPoint = withUnsafePointer(to: &entry.f_mntonname) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            let device = withUnsafePointer(to: &entry.f_mntfromname) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            guard mountPoint.hasPrefix("/Volumes/"), device.hasPrefix("/dev/") else { continue }
+            let bsd = String(device.dropFirst("/dev/".count))
+            guard let disk = DADiskCreateFromBSDName(kCFAllocatorDefault, session, bsd),
+                  let desc = DADiskCopyDescription(disk) as? [String: Any] else { continue }
+
+            let model = ((desc[kDADiskDescriptionDeviceModelKey as String] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+            let proto = (desc[kDADiskDescriptionDeviceProtocolKey as String] as? String) ?? ""
+            let isImage = model == "Disk Image"
+            let internalDrive = (desc[kDADiskDescriptionDeviceInternalKey as String] as? Bool) ?? false
+            let removable = (desc[kDADiskDescriptionMediaRemovableKey as String] as? Bool) ?? false
+            let ejectable = (desc[kDADiskDescriptionMediaEjectableKey as String] as? Bool) ?? false
+            if internalDrive && !isImage && !removable && !ejectable { continue }
+
+            let name = (desc[kDADiskDescriptionVolumeNameKey as String] as? String) ?? (mountPoint as NSString).lastPathComponent
+            let kind = (desc[kDADiskDescriptionVolumeKindKey as String] as? String) ?? ""
+            result.append(Mounted(path: mountPoint, name: name, uuid: uuid(from: desc), format: formatName(kind),
+                                  space: space(atMountPoint: mountPoint), isImage: isImage,
+                                  category: DriveCategory.classify(isImage: isImage, deviceProtocol: proto, model: model)))
+        }
+        return result
+    }
+
+    static func uuid(from desc: [String: Any]) -> String? {
+        guard let raw = desc[kDADiskDescriptionVolumeUUIDKey as String],
+              CFGetTypeID(raw as CFTypeRef) == CFUUIDGetTypeID(),
+              let text = CFUUIDCreateString(kCFAllocatorDefault, (raw as! CFUUID)) else { return nil }
+        return text as String
+    }
+}

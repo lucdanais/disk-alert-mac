@@ -128,6 +128,7 @@ struct RuleBlock: View {
     @Binding var rule: DriveRule
     var defaultConnect: String
     var defaultEject: String
+    var onForget: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -139,6 +140,17 @@ struct RuleBlock: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            if let onForget {
+                Spacer()
+                Button(action: onForget) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Forget this drive")
+                .accessibilityLabel("Forget \(title)")
             }
         }
         SoundRow(title: "Connected", selection: $rule.connectSound,
@@ -180,12 +192,13 @@ struct DrivesTab: View {
                         RuleBlock(symbol: drive.category.symbol, title: drive.name, subtitle: subtitle(drive),
                                   rule: model.ruleBinding(forDrive: drive.id),
                                   defaultConnect: model.settings.fallbackSound(connect: true, category: drive.category),
-                                  defaultEject: model.settings.fallbackSound(connect: false, category: drive.category))
+                                  defaultEject: model.settings.fallbackSound(connect: false, category: drive.category),
+                                  onForget: { confirmForget(drive) })
                     } header: {
                         if i == 0 { Text("Your drives") }
                     } footer: {
                         if i == model.drives.count - 1 {
-                            Text("“Default” follows the drive’s type, then General. “Mute” silences that alert.")
+                            Text("“Default” follows the drive’s type, then General. “Mute” silences that alert. The − button forgets a drive and its sounds; it comes back the next time it’s plugged in.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -195,6 +208,15 @@ struct DrivesTab: View {
         .formStyle(.grouped)
         .frame(width: SettingsLayout.size.width, height: SettingsLayout.size.height)
         .onAppear { model.refresh() }
+    }
+
+    private func confirmForget(_ drive: KnownDrive) {
+        let a = NSAlert()
+        a.messageText = "Forget “\(drive.name)”?"
+        a.informativeText = "Its sounds go back to Default and it leaves this list. It shows up again the next time you plug it in."
+        a.addButton(withTitle: "Forget")
+        a.addButton(withTitle: "Cancel")
+        if a.runModal() == .alertFirstButtonReturn { model.forgetDrive(drive.id) }
     }
 
     private func subtitle(_ drive: KnownDrive) -> String {
