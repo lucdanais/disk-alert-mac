@@ -64,26 +64,36 @@ enum DriveCategory: String, Codable, CaseIterable, Identifiable {
 // MARK: - Settings
 
 struct DriveRule: Codable, Equatable {
-    var split = false
-    var sound = "Default"
     var connectSound = "Default"
     var ejectSound = "Default"
 
-    init(sound: String = "Default") { self.sound = sound }
+    init(connect: String = "Default", eject: String = "Default") {
+        connectSound = connect
+        ejectSound = eject
+    }
+
+    private enum CodingKeys: String, CodingKey { case connectSound, ejectSound, split, sound }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        split = try c.decodeIfPresent(Bool.self, forKey: .split) ?? false
-        sound = try c.decodeIfPresent(String.self, forKey: .sound) ?? "Default"
         connectSound = try c.decodeIfPresent(String.self, forKey: .connectSound) ?? "Default"
         ejectSound = try c.decodeIfPresent(String.self, forKey: .ejectSound) ?? "Default"
+        // Older versions kept one sound for both unless split; carry it over.
+        let split = try c.decodeIfPresent(Bool.self, forKey: .split) ?? true
+        if !split, let one = try c.decodeIfPresent(String.self, forKey: .sound) {
+            connectSound = one
+            ejectSound = one
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(connectSound, forKey: .connectSound)
+        try c.encode(ejectSound, forKey: .ejectSound)
     }
 
     /// The sound this rule picks for a connect or eject. "Default" means no opinion.
-    /// Separate sounds only count while the master switch allows them.
-    func pick(connect: Bool, allowSplit: Bool) -> String {
-        (split && allowSplit) ? (connect ? connectSound : ejectSound) : sound
-    }
+    func pick(connect: Bool) -> String { connect ? connectSound : ejectSound }
 }
 
 enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
@@ -110,11 +120,10 @@ struct AppSettings: Codable, Equatable {
     var openInFinder = false
     var playSoundDirectly = false    // fallback if notification sounds stay silent
     var appearance: AppearanceMode = .system
-    var splitSounds = false          // master switch for separate connect and eject sounds
     var categoryRules: [String: DriveRule] = AppSettings.defaultCategoryRules
     var driveRules: [String: DriveRule] = [:]
 
-    static let defaultCategoryRules: [String: DriveRule] = [DriveCategory.diskImage.rawValue: DriveRule(sound: "Purr")]
+    static let defaultCategoryRules: [String: DriveRule] = [DriveCategory.diskImage.rawValue: DriveRule(connect: "Purr", eject: "Purr")]
 
     init() {}
 
@@ -132,17 +141,8 @@ struct AppSettings: Codable, Equatable {
         openInFinder = try c.decodeIfPresent(Bool.self, forKey: .openInFinder) ?? d.openInFinder
         playSoundDirectly = try c.decodeIfPresent(Bool.self, forKey: .playSoundDirectly) ?? d.playSoundDirectly
         appearance = try c.decodeIfPresent(AppearanceMode.self, forKey: .appearance) ?? d.appearance
-        splitSounds = try c.decodeIfPresent(Bool.self, forKey: .splitSounds) ?? d.splitSounds
         categoryRules = try c.decodeIfPresent([String: DriveRule].self, forKey: .categoryRules) ?? d.categoryRules
         driveRules = try c.decodeIfPresent([String: DriveRule].self, forKey: .driveRules) ?? [:]
-        // Settings from before the master switch existed start with every drive on one sound.
-        if !c.contains(.splitSounds) { clearSplits() }
-    }
-
-    /// Puts every drive and drive type back on a single sound.
-    mutating func clearSplits() {
-        for k in driveRules.keys { driveRules[k]?.split = false }
-        for k in categoryRules.keys { categoryRules[k]?.split = false }
     }
 
     func defaultSound(connect: Bool) -> String { connect ? connectSound : ejectSound }
@@ -150,11 +150,11 @@ struct AppSettings: Codable, Equatable {
     /// Drive rule first, then its category, then the default sound.
     func resolvedSound(connect: Bool, driveID: String?, category: DriveCategory) -> String {
         if let id = driveID, let rule = driveRules[id] {
-            let p = rule.pick(connect: connect, allowSplit: splitSounds)
+            let p = rule.pick(connect: connect)
             if p != "Default" { return p }
         }
         if let rule = categoryRules[category.rawValue] {
-            let p = rule.pick(connect: connect, allowSplit: splitSounds)
+            let p = rule.pick(connect: connect)
             if p != "Default" { return p }
         }
         return defaultSound(connect: connect)

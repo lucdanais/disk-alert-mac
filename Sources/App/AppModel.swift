@@ -36,10 +36,6 @@ final class AppModel: ObservableObject {
     @Published var settings: AppSettings {
         didSet {
             guard settings != oldValue else { return }
-            if oldValue.splitSounds && !settings.splitSounds {
-                settings.clearSplits()   // re-enters didSet once, then saves
-                return
-            }
             Store.save(settings, to: DiskAlert.settingsURL)
             if settings.enabled != oldValue.enabled {
                 settings.enabled ? AgentControl.enable() : AgentControl.disable()
@@ -176,6 +172,31 @@ final class AppModel: ObservableObject {
         panel.message = "Choose sounds to add to Disk Alert"
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK { panel.urls.forEach(addSound) }
+    }
+
+    /// Asks first, then moves the sound file to the Trash.
+    func confirmDeleteSound(_ name: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.alertStyle = .warning
+        a.messageText = "Delete “\(name)”?"
+        a.informativeText = "The sound file moves to the Trash and disappears from Disk Alert. Drives using it go back to Default."
+        a.addButton(withTitle: "Cancel")
+        let del = a.addButton(withTitle: "Delete")
+        del.hasDestructiveAction = true
+        guard a.runModal() == .alertSecondButtonReturn else { return }
+        removeSound(name)
+        for (k, r) in settings.driveRules {
+            if r.connectSound == name { settings.driveRules[k]?.connectSound = "Default" }
+            if r.ejectSound == name { settings.driveRules[k]?.ejectSound = "Default" }
+        }
+        for (k, r) in settings.categoryRules {
+            if r.connectSound == name { settings.categoryRules[k]?.connectSound = "Default" }
+            if r.ejectSound == name { settings.categoryRules[k]?.ejectSound = "Default" }
+        }
+        for key in [\AppSettings.connectSound, \AppSettings.ejectSound, \AppSettings.unsafeSound] where settings[keyPath: key] == name {
+            settings[keyPath: key] = AppSettings()[keyPath: key]
+        }
     }
 
     func removeSound(_ name: String) {

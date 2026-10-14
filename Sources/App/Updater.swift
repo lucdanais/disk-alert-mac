@@ -1,16 +1,24 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 /// Checks GitHub Releases for a newer Disk Alert and installs it.
-final class Updater: ObservableObject {
+final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = Updater()
     static let repo = "open-luc/disk-alert-mac"
 
     enum State: Equatable {
-        case idle, checking, upToDate, available(String), downloading, failed(String)
+        case idle, checking, upToDate, available(String), downloading, installing, failed(String)
     }
 
     @Published var state: State = .idle
+    @Published var progress: Double? = nil          // 0...1 while downloading, nil when unknown
+    @Published var received: Int64 = 0
+    @Published var expected: Int64 = 0
+    private var downloadTask: URLSessionDownloadTask?
+    private var downloadSession: URLSession?
+    private var progressWindow: NSWindow?
+    private var pendingVersion = ""
     @Published var lastChecked: Date? = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date
 
     @Published var automatic: Bool = UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true {
@@ -48,7 +56,7 @@ final class Updater: ObservableObject {
     }
 
     func check(userInitiated: Bool) {
-        guard state != .checking, state != .downloading else { return }
+        guard state != .checking, state != .downloading, state != .installing else { return }
         state = .checking
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -107,6 +115,7 @@ final class Updater: ObservableObject {
                 alert("Couldn’t update", "This release has no .dmg installer attached.")
                 return
             }
+            pendingVersion = version
             install(from: url)
         case .alertThirdButtonReturn:
             if let url = URL(string: release.html_url) { NSWorkspace.shared.open(url) }
@@ -117,21 +126,88 @@ final class Updater: ObservableObject {
 
     private func install(from url: URL) {
         state = .downloading
-        URLSession.shared.downloadTask(with: url) { file, _, error in
-            guard let file, error == nil else {
-                DispatchQueue.main.async {
-                    self.state = .failed("Download failed.")
-                    self.alert("Couldn’t download the update", "Try again later.")
-                }
-                return
-            }
-            let work = FileManager.default.temporaryDirectory.appendingPathComponent("DiskAlertUpdate-\(UUID().uuidString)")
-            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-            let dmg = work.appendingPathComponent("update.dmg")
-            try? FileManager.default.moveItem(at: file, to: dmg)
-            DispatchQueue.main.async { self.replaceAndRelaunch(dmg: dmg, work: work) }
-        }.resume()
+        progress = 0
+        received = 0
+        expected = 0
+        showProgressWindow()
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        downloadSession = session
+        downloadTask = session.downloadTask(with: url)
+        downloadTask?.resume()
     }
+
+    func cancelDownload() {
+        guard state == .downloading else { return }
+        downloadTask?.cancel()
+        downloadSession?.invalidateAndCancel()
+        state = .idle
+        progress = nil
+        closeProgressWindow()
+    }
+
+    // MARK: Download progress
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        received = totalBytesWritten
+        expected = totalBytesExpectedToWrite
+        progress = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : nil
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("DiskAlertUpdate-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        let dmg = work.appendingPathComponent("update.dmg")
+        do {
+            try FileManager.default.moveItem(at: location, to: dmg)
+        } catch {
+            fail("Couldn’t save the update", error.localizedDescription)
+            return
+        }
+        state = .installing
+        progress = nil
+        // Let the window show "Installing…" for a moment before the app quits.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.replaceAndRelaunch(dmg: dmg, work: work) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        session.finishTasksAndInvalidate()
+        guard let error else { return }
+        if (error as NSError).code == NSURLErrorCancelled { return }
+        fail("Couldn’t download the update", error.localizedDescription)
+    }
+
+    private func fail(_ title: String, _ text: String) {
+        state = .failed(title)
+        progress = nil
+        closeProgressWindow()
+        alert(title, text)
+    }
+
+    // MARK: Progress window
+
+    private func showProgressWindow() {
+        if progressWindow == nil {
+            let host = NSHostingController(rootView: UpdateProgressView(updater: self))
+            host.sizingOptions = [.preferredContentSize]
+            let w = NSWindow(contentViewController: host)
+            w.title = "Updating Disk Alert"
+            w.styleMask = [.titled]
+            w.isReleasedWhenClosed = false
+            w.level = .floating
+            w.center()
+            progressWindow = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        progressWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func closeProgressWindow() {
+        progressWindow?.orderOut(nil)
+        progressWindow = nil
+    }
+
+    var newVersion: String { pendingVersion }
 
     /// Hands the swap to a small script that waits for this app to quit, replaces it, and opens the new one.
     private func replaceAndRelaunch(dmg: URL, work: URL) {
@@ -161,8 +237,7 @@ final class Updater: ObservableObject {
             try p.run()
             NSApp.terminate(nil)
         } catch {
-            state = .failed("Couldn’t start the installer.")
-            alert("Couldn’t install the update", error.localizedDescription)
+            fail("Couldn’t install the update", error.localizedDescription)
         }
     }
 
@@ -178,11 +253,59 @@ final class Updater: ObservableObject {
         switch state {
         case .checking: return "Checking…"
         case .downloading: return "Downloading update…"
+        case .installing: return "Installing update…"
         case .available(let v): return "Version \(v) is available"
         case .failed(let why): return why
         case .upToDate, .idle:
             if let d = lastChecked { return "Last checked " + d.formatted(.relative(presentation: .named)) }
             return "Not checked yet"
+        }
+    }
+}
+
+struct UpdateProgressView: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Updating to Disk Alert \(updater.newVersion)")
+                        .font(.headline)
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            if let p = updater.progress, updater.state == .downloading {
+                ProgressView(value: p)
+            } else {
+                ProgressView().progressViewStyle(.linear)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { updater.cancelDownload() }
+                    .disabled(updater.state != .downloading)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private var detail: String {
+        switch updater.state {
+        case .installing:
+            return "Installing… Disk Alert will reopen by itself."
+        default:
+            if updater.expected > 0 {
+                return "Downloading \(Format.bytes(updater.received)) of \(Format.bytes(updater.expected))"
+            }
+            return "Downloading…"
         }
     }
 }

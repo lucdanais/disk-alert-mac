@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             add("General", "gearshape", GeneralTab())
             add("Drives", "externaldrive", DrivesTab())
-            add("Sounds", "speaker.wave.2", SoundsTab())
+            add("Custom Sounds", "speaker.wave.2", SoundsTab())
 
             let window = NSWindow(contentViewController: tabs)
             window.title = "Disk Alert"

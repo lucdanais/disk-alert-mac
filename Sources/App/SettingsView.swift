@@ -119,33 +119,15 @@ struct UpdatesSection: View {
 
 // MARK: - Drives
 
-/// One sound, or separate connect and eject sounds, for a drive or a drive type.
-struct RuleEditor: View {
-    @EnvironmentObject var model: AppModel
-    @Binding var rule: DriveRule
-    var defaultConnect: String
-    var defaultEject: String
-
-    var body: some View {
-        if model.settings.splitSounds && rule.split {
-            SoundRow(title: "Connected", selection: $rule.connectSound,
-                     leading: ["Default"], trailing: ["Mute"], defaultSound: defaultConnect)
-            SoundRow(title: "Ejected", selection: $rule.ejectSound,
-                     leading: ["Default"], trailing: ["Mute"], defaultSound: defaultEject)
-        }
-        if model.settings.splitSounds {
-            Toggle("Separate connect and eject sounds", isOn: $rule.split)
-        }
-    }
-}
-
-struct RuleHeader: View {
+/// A drive or drive type: its name, then a Connected and an Ejected sound menu.
+struct RuleBlock: View {
     @EnvironmentObject var model: AppModel
     let symbol: String
     let title: String
     let subtitle: String
     @Binding var rule: DriveRule
-    var defaultSound: String
+    var defaultConnect: String
+    var defaultEject: String
 
     var body: some View {
         HStack(spacing: 12) {
@@ -158,14 +140,11 @@ struct RuleHeader: View {
                 Text(title)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
-            Spacer()
-            if !(model.settings.splitSounds && rule.split) {
-                SoundMenu(selection: $rule.sound, leading: ["Default"], trailing: ["Mute"],
-                          custom: model.customSounds, defaultSound: defaultSound)
-                    .fixedSize()
-                PlayButton(sound: rule.sound == "Default" ? defaultSound : rule.sound)
-            }
         }
+        SoundRow(title: "Connected", selection: $rule.connectSound,
+                 leading: ["Default"], trailing: ["Mute"], defaultSound: defaultConnect)
+        SoundRow(title: "Ejected", selection: $rule.ejectSound,
+                 leading: ["Default"], trailing: ["Mute"], defaultSound: defaultEject)
     }
 }
 
@@ -174,46 +153,42 @@ struct DrivesTab: View {
 
     var body: some View {
         Form {
-            Section {
-                ForEach(DriveCategory.allCases) { c in
-                    let rule = model.ruleBinding(forCategory: c)
-                    RuleHeader(symbol: c.symbol, title: c.title, subtitle: c.detail, rule: rule,
-                               defaultSound: model.settings.connectSound)
-                    RuleEditor(rule: rule, defaultConnect: model.settings.connectSound,
-                               defaultEject: model.settings.ejectSound)
-                }
-            } header: {
-                Text("Drive types")
-            } footer: {
-                Text("“Default” uses the sounds from General. Disk Alert recognizes SD cards in the built-in slot and most card readers.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section {
-                if model.drives.isEmpty {
-                    Text("Drives show up here after they connect once.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.drives) { drive in
-                        let rule = model.ruleBinding(forDrive: drive.id)
-                        RuleHeader(symbol: drive.category.symbol, title: drive.name, subtitle: subtitle(drive), rule: rule,
-                                   defaultSound: model.settings.fallbackSound(connect: true, category: drive.category))
-                        RuleEditor(rule: rule,
-                                   defaultConnect: model.settings.fallbackSound(connect: true, category: drive.category),
-                                   defaultEject: model.settings.fallbackSound(connect: false, category: drive.category))
+            ForEach(Array(DriveCategory.allCases.enumerated()), id: \.element) { i, c in
+                Section {
+                    RuleBlock(symbol: c.symbol, title: c.title, subtitle: c.detail,
+                              rule: model.ruleBinding(forCategory: c),
+                              defaultConnect: model.settings.connectSound,
+                              defaultEject: model.settings.ejectSound)
+                } header: {
+                    if i == 0 { Text("Drive types") }
+                } footer: {
+                    if i == DriveCategory.allCases.count - 1 {
+                        Text("“Default” follows the sounds in General. SD cards are recognized in the built-in slot and most card readers.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-            } header: {
-                Text("Your drives")
-            } footer: {
-                Text("A drive’s own sound wins over its type. “Mute” turns off connect and eject alerts.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section {
-                Toggle(isOn: $model.settings.splitSounds) {
-                    Text("Separate connect and eject sounds")
-                    Text("Lets each drive and drive type have its own switch for a different eject sound. When off, every drive uses one sound for both.")
+            if model.drives.isEmpty {
+                Section("Your drives") {
+                    Text("Drives show up here after they connect once.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(Array(model.drives.enumerated()), id: \.element.id) { i, drive in
+                    Section {
+                        RuleBlock(symbol: drive.category.symbol, title: drive.name, subtitle: subtitle(drive),
+                                  rule: model.ruleBinding(forDrive: drive.id),
+                                  defaultConnect: model.settings.fallbackSound(connect: true, category: drive.category),
+                                  defaultEject: model.settings.fallbackSound(connect: false, category: drive.category))
+                    } header: {
+                        if i == 0 { Text("Your drives") }
+                    } footer: {
+                        if i == model.drives.count - 1 {
+                            Text("“Default” follows the drive’s type, then General. “Mute” silences that alert.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -262,13 +237,14 @@ struct SoundsTab: View {
                             .accessibilityLabel("Play \(name)")
                             Text(name)
                             Spacer()
-                            Button("Remove") { model.removeSound(name) }
+                            Button("Delete…", role: .destructive) { model.confirmDeleteSound(name) }
+                                .foregroundStyle(.red)
                         }
                     }
                 }
             } header: {
                 HStack {
-                    Text("Your sounds")
+                    Text("Custom sounds")
                     Spacer()
                     Button("Add Sound…") { model.chooseSounds() }
                 }
