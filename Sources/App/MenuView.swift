@@ -48,7 +48,7 @@ struct MenuView: View {
                     AppDelegate.shared?.showSettings()
                 }
                 MenuRow(title: "Hide Menu Bar Icon", symbol: "eye.slash",
-                        detail: "Alerts keep running. Open Disk Alert to bring it back.", key: "h") {
+                        detail: "Alerts keep running", key: "h") {
                     model.hideMenuBarIcon()
                 }
             }
@@ -138,7 +138,7 @@ struct MenuRow: View {
     var key: KeyEquivalent? = nil
     let action: () -> Void
 
-    private var shortcut: String? { key.map { "⌘" + String($0.character) } }
+    private var shortcut: String? { key.map { "⌘" + String($0.character).uppercased() } }
     @State private var hovering = false
 
     var body: some View {
