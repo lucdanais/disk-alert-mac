@@ -297,17 +297,40 @@ enum Format {
 
 import DiskArbitration
 
-/// Reads volume details from Disk Arbitration and statfs only. Neither opens anything on
-/// the drive, so macOS has no reason to ask for permission to access removable volumes.
+/// Reads volume details from Disk Arbitration and the mount list only. Neither opens or looks
+/// inside the drive, so macOS has no reason to ask for permission to access removable volumes.
 enum VolumeInfo {
     struct Space { let free: Int64; let total: Int64 }
 
-    /// Free and total space from the file system's own counters.
+    /// The system's list of mounted file systems. Reading it never opens or looks inside
+    /// any drive, so macOS has no reason to ask for removable-volume access.
+    private static func mountTable() -> [statfs] {
+        var list: UnsafeMutablePointer<statfs>?
+        let count = Int(getmntinfo(&list, MNT_NOWAIT))
+        guard count > 0, let list else { return [] }
+        return (0..<count).map { list[$0] }
+    }
+
+    private static func mountPoint(of entry: statfs) -> String {
+        var e = entry
+        return withUnsafePointer(to: &e.f_mntonname) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+        }
+    }
+
+    private static func space(of entry: statfs) -> Space {
+        let block = Int64(entry.f_bsize)
+        return Space(free: Int64(entry.f_bavail) * block, total: Int64(entry.f_blocks) * block)
+    }
+
+    /// Free and total space from the mount list, without touching the drive.
     static func space(atMountPoint path: String) -> Space? {
-        var st = statfs()
-        guard statfs(path, &st) == 0 else { return nil }
-        let block = Int64(st.f_bsize)
-        return Space(free: Int64(st.f_bavail) * block, total: Int64(st.f_blocks) * block)
+        mountTable().first { mountPoint(of: $0) == path }.map(space(of:))
+    }
+
+    /// Whether something is still mounted at this path, without touching the drive.
+    static func isMounted(_ path: String) -> Bool {
+        mountTable().contains { mountPoint(of: $0) == path }
     }
 
     /// Plain-English name for a file system type such as "apfs" or "exfat".
@@ -337,15 +360,9 @@ enum VolumeInfo {
     /// External volumes mounted under /Volumes, described without reading them.
     static func mounted() -> [Mounted] {
         guard let session = DASessionCreate(kCFAllocatorDefault) else { return [] }
-        var list: UnsafeMutablePointer<statfs>?
-        let count = Int(getmntinfo(&list, MNT_NOWAIT))
-        guard count > 0, let list else { return [] }
         var result: [Mounted] = []
-        for i in 0..<count {
-            var entry = list[i]
-            let mountPoint = withUnsafePointer(to: &entry.f_mntonname) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
-            }
+        for var entry in mountTable() {
+            let mountPoint = Self.mountPoint(of: entry)
             let device = withUnsafePointer(to: &entry.f_mntfromname) {
                 $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
             }
@@ -365,7 +382,7 @@ enum VolumeInfo {
             let name = (desc[kDADiskDescriptionVolumeNameKey as String] as? String) ?? (mountPoint as NSString).lastPathComponent
             let kind = (desc[kDADiskDescriptionVolumeKindKey as String] as? String) ?? ""
             result.append(Mounted(path: mountPoint, name: name, uuid: uuid(from: desc), format: formatName(kind),
-                                  space: space(atMountPoint: mountPoint), isImage: isImage,
+                                  space: space(of: entry), isImage: isImage,
                                   category: DriveCategory.classify(isImage: isImage, deviceProtocol: proto, model: model)))
         }
         return result

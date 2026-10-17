@@ -53,8 +53,8 @@ struct GeneralTab: View {
                     Text("Free space, capacity and format in the notification")
                 }
                 Toggle(isOn: $model.settings.openInFinder) {
-                    Text("Open in Finder automatically")
-                    Text("Clicking the notification always opens the drive")
+                    Text("Show in Finder automatically")
+                    Text("Clicking the notification always shows the drive in Finder")
                 }
             }
 

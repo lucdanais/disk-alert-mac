@@ -236,6 +236,25 @@ final class AppModel: ObservableObject {
 
     var openAtLogin: Bool { loginStatus == .enabled || loginStatus == .requiresApproval }
 
+    /// Hides the menu bar icon by closing the menu bar app and keeping it from opening at login.
+    /// Alerts keep running. Opening Disk Alert again brings the icon back (see restoreMenuBarIcon).
+    func hideMenuBarIcon() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "menuBarIconHidden")
+        defaults.set(openAtLogin, forKey: "openAtLoginBeforeHide")
+        if openAtLogin { setOpenAtLogin(false) }
+        NSApp.terminate(nil)
+    }
+
+    /// Called on launch. Returns true if the icon had been hidden and is now back.
+    func restoreMenuBarIcon() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "menuBarIconHidden") else { return false }
+        defaults.set(false, forKey: "menuBarIconHidden")
+        if defaults.bool(forKey: "openAtLoginBeforeHide") { setOpenAtLogin(true) }
+        return true
+    }
+
     func setOpenAtLogin(_ on: Bool) {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }

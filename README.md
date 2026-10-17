@@ -9,15 +9,17 @@ A lightweight macOS menu bar app that notifies you when drives connect, eject, o
 - **Drive types.** External drives, SD and memory cards, and disk images are recognized separately, each with its own sound or mute.
 - **Sounds per drive.** Give each drive its own sound, split it into separate connect and eject sounds, or mute it.
 - **Hear sounds as you browse.** Move the pointer through a sound menu and each one plays, like System Settings.
-- **Click to open.** Clicking a "connected" notification opens the drive in Finder.
+- **Click to show.** Clicking a "connected" notification shows the drive in Finder.
 - **Your own sounds.** Drag in any audio file. It is converted and saved to `~/Library/Sounds`.
 - **Menu bar.** See connected drives with free space, eject one, or eject all (with two confirmations).
-- **Open in Finder** when a drive connects (optional).
+- **Show in Finder** when a drive connects (optional).
+- **Hide the menu bar icon** if you only want the alerts. Open Disk Alert again to bring it back.
 - **Light, Dark or System appearance.**
 - **Opens at login** in the menu bar (can be turned off in Settings).
 - **Respects Focus and Do Not Disturb**, like any other Mac notification.
 - **Updates itself.** Check for Updates in the menu bar or Settings installs the newest release from GitHub. Older versions stay available on the [Releases page](https://github.com/open-luc/disk-alert-mac/releases).
-- **Runs in the background.** Alerts keep working after you quit the menu bar app. Turn them off with the switch in Settings.
+- **Runs in the background.** Alerts keep working even with the menu bar icon hidden. Turn them off with the switch in Settings.
+- **Never asks for drive access.** Drive name, size and free space come from macOS's own drive list, so Disk Alert never looks inside your drives.
 
 ## Screenshots
 

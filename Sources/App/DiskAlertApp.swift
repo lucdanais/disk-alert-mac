@@ -35,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !defaults.bool(forKey: "hasLaunchedBefore") {
             defaults.set(true, forKey: "hasLaunchedBefore")
             showSettings()
+        } else if AppModel.shared.restoreMenuBarIcon() {
+            // Opened after the icon was hidden: it's back, and Settings shows where things are.
+            showSettings()
         }
         // Open at login starts on. Applied once, so turning it off later sticks.
         if !defaults.bool(forKey: "openAtLoginDefaultApplied") {

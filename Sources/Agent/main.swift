@@ -184,7 +184,7 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         post(content)
 
         if event == .connect && s.openInFinder {
-            NSWorkspace.shared.open(vol.url)
+            showInFinder(vol.url)
         }
     }
 
@@ -205,15 +205,21 @@ final class Monitor: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .list, .sound])
     }
 
-    /// Clicking a "connected" notification opens the drive in Finder.
+    /// Opens a Finder window with the drive selected. Opening the drive itself would count as
+    /// reading it, and macOS would ask for removable-volume access.
+    private func showInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Clicking a "connected" notification shows the drive in Finder.
     /// Other notifications open Disk Alert's settings.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         defer { completionHandler() }
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
         if let path = response.notification.request.content.userInfo["path"] as? String,
-           FileManager.default.fileExists(atPath: path) {
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+           VolumeInfo.isMounted(path) {
+            showInFinder(URL(fileURLWithPath: path))
         } else {
             openMainApp()
         }

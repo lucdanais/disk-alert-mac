@@ -44,11 +44,12 @@ struct MenuView: View {
                 MenuRow(title: "Check for Updates…", symbol: "arrow.down.circle") {
                     Updater.shared.check(userInitiated: true)
                 }
-                MenuRow(title: "Settings…", symbol: "gearshape", shortcut: "⌘,") {
+                MenuRow(title: "Settings…", symbol: "gearshape", key: ",") {
                     AppDelegate.shared?.showSettings()
                 }
-                MenuRow(title: "Quit Disk Alert", symbol: "power", detail: "Alerts keep running", shortcut: "⌘Q") {
-                    NSApp.terminate(nil)
+                MenuRow(title: "Hide Menu Bar Icon", symbol: "eye.slash",
+                        detail: "Alerts keep running. Open Disk Alert to bring it back.", key: "h") {
+                    model.hideMenuBarIcon()
                 }
             }
         }
@@ -123,8 +124,8 @@ struct DriveTile: View {
         .padding(10)
         .moduleBackground()
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { NSWorkspace.shared.open(volume.url) }
-        .help("Double-click to open in Finder")
+        .onTapGesture(count: 2) { NSWorkspace.shared.activateFileViewerSelecting([volume.url]) }
+        .help("Double-click to show in Finder")
     }
 }
 
@@ -133,8 +134,11 @@ struct MenuRow: View {
     let title: String
     let symbol: String
     var detail: String? = nil
-    var shortcut: String? = nil
+    /// A Command-key shortcut that works while the menu is open, e.g. "," for ⌘,
+    var key: KeyEquivalent? = nil
     let action: () -> Void
+
+    private var shortcut: String? { key.map { "⌘" + String($0.character) } }
     @State private var hovering = false
 
     var body: some View {
@@ -168,7 +172,16 @@ struct MenuRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .modifier(CommandShortcut(key: key))
         .onHover { hovering = $0 }
+    }
+}
+
+/// Adds a Command-key shortcut only when the row has one.
+struct CommandShortcut: ViewModifier {
+    let key: KeyEquivalent?
+    func body(content: Content) -> some View {
+        if let key { content.keyboardShortcut(key, modifiers: .command) } else { content }
     }
 }
 
